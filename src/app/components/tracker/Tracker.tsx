@@ -1,17 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { useEffect, useMemo, useState } from "react";
 import confetti from "canvas-confetti";
 import { toast } from "sonner";
-import { Check, Loader2, Plus, Trash2 } from "lucide-react";
-import { createClient } from "@/app/lib/supabase/client";
 import {
-  DIFFICULTIES,
-  difficultyFromReward,
-  type Difficulty,
-} from "@/app/lib/xp";
-import type { Habit, Hero } from "@/app/lib/types";
+  BarChart3,
+  CalendarDays,
+  CalendarRange,
+  ListChecks,
+  Loader2,
+  Sun,
+} from "lucide-react";
+import { createClient } from "@/app/lib/supabase/client";
+import { archetypeStyle } from "@/app/lib/constants";
+import { todayKey } from "@/app/lib/dates";
+import {
+  dailyStreak,
+  habitStreak,
+  perfectDayStreak,
+  type Streak,
+} from "@/app/lib/streaks";
+import type { Habit, HabitCompletion, Hero, Todo } from "@/app/lib/types";
+import { CreateHabit } from "./CreateHabit";
+import { TodayView, type HabitActions } from "./TodayView";
+import { WeekView } from "./WeekView";
+import { MonthView } from "./MonthView";
+import { TodoList } from "./TodoList";
+import { StatsView } from "./StatsView";
+
+type View = "today" | "week" | "month" | "todos" | "stats";
+
+const VIEWS: { id: View; label: string; icon: React.ReactNode }[] = [
+  { id: "today", label: "TODAY", icon: <Sun size={13} /> },
+  { id: "week", label: "WEEK", icon: <CalendarDays size={13} /> },
+  { id: "month", label: "MONTH", icon: <CalendarRange size={13} /> },
+  { id: "todos", label: "TO-DO", icon: <ListChecks size={13} /> },
+  { id: "stats", label: "STATS", icon: <BarChart3 size={13} /> },
+];
 
 export function Tracker({
   hero,
@@ -21,111 +46,256 @@ export function Tracker({
   onStatsChange: (xp: number, level: number) => void;
 }) {
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [doneToday, setDoneToday] = useState<Set<string>>(new Set());
+  const [completions, setCompletions] = useState<HabitCompletion[]>([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [title, setTitle] = useState("");
-  const [difficulty, setDifficulty] = useState<Difficulty>("easy");
-  const [adding, setAdding] = useState(false);
-  const [completing, setCompleting] = useState<string | null>(null);
+  const [view, setView] = useState<View>("today");
+  const [busyHabit, setBusyHabit] = useState<string | null>(null);
+  const [busyTodo, setBusyTodo] = useState<string | null>(null);
 
-  const taskTerm = (hero.archetype?.task_term ?? "Quest").toUpperCase();
+  const style = archetypeStyle(hero.archetype?.name);
   const xpTerm = (hero.archetype?.xp_term ?? "XP").toUpperCase();
+  const taskTerm = (hero.archetype?.task_term ?? "Quest").toUpperCase();
   const levelTerm = (hero.archetype?.level_term ?? "Level").toUpperCase();
+  const tk = todayKey();
 
   useEffect(() => {
     const supabase = createClient();
     (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const [habitsRes, doneRes] = await Promise.all([
-        supabase
-          .from("habits")
-          .select("*")
-          .order("created_at", { ascending: true }),
+      const [habitsRes, compsRes, todosRes] = await Promise.all([
+        supabase.from("habits").select("*").order("created_at", { ascending: true }),
         supabase
           .from("habit_completions")
-          .select("habit_id")
-          .eq("completed_on", today),
+          .select("habit_id, completed_on, xp_granted"),
+        supabase.from("todos").select("*").order("created_at", { ascending: true }),
       ]);
-      setHabits(
-        ((habitsRes.data as Habit[]) ?? []).filter((h) => h.is_active !== false)
-      );
-      setDoneToday(
-        new Set((doneRes.data ?? []).map((c) => c.habit_id as string))
-      );
+      setHabits((habitsRes.data as Habit[]) ?? []);
+      setCompletions((compsRes.data as HabitCompletion[]) ?? []);
+      setTodos((todosRes.data as Todo[]) ?? []);
       setLoading(false);
     })();
   }, []);
 
-  const addHabit = async () => {
-    const trimmed = title.trim();
-    if (!trimmed || adding) return;
-    setAdding(true);
-    const supabase = createClient();
-    const meta = DIFFICULTIES.find((d) => d.id === difficulty)!;
-    const { data, error } = await supabase
-      .from("habits")
-      .insert({
-        user_id: hero.profile.id,
-        title: trimmed,
-        xp_reward: meta.xp,
-        is_active: true,
-      })
-      .select()
-      .single();
-    setAdding(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+  // ── derived data ──
+  const nonArchived = useMemo(
+    () => habits.filter((h) => !h.archived_at),
+    [habits]
+  );
+
+  const { compByHabit, compByDay, daysWithAny, xpByDay, doneToday } = useMemo(() => {
+    const byHabit = new Map<string, Set<string>>();
+    const byDay = new Map<string, Set<string>>();
+    const anyDays = new Set<string>();
+    const xpDay = new Map<string, number>();
+    const today = new Set<string>();
+    for (const c of completions) {
+      const k = c.completed_on.slice(0, 10);
+      if (!byHabit.has(c.habit_id)) byHabit.set(c.habit_id, new Set());
+      byHabit.get(c.habit_id)!.add(k);
+      if (!byDay.has(k)) byDay.set(k, new Set());
+      byDay.get(k)!.add(c.habit_id);
+      anyDays.add(k);
+      xpDay.set(k, (xpDay.get(k) ?? 0) + (c.xp_granted ?? 0));
+      if (k === tk) today.add(c.habit_id);
     }
-    setHabits((h) => [...h, data as Habit]);
-    setTitle("");
+    return {
+      compByHabit: byHabit,
+      compByDay: byDay,
+      daysWithAny: anyDays,
+      xpByDay: xpDay,
+      doneToday: today,
+    };
+  }, [completions, tk]);
+
+  const streaks = useMemo(() => {
+    const m = new Map<string, Streak>();
+    for (const h of habits) {
+      m.set(h.id, habitStreak(h, compByHabit.get(h.id) ?? new Set()));
+    }
+    return m;
+  }, [habits, compByHabit]);
+
+  const dailyStreakVal = useMemo(() => dailyStreak(daysWithAny), [daysWithAny]);
+  const perfectStreakVal = useMemo(
+    () => perfectDayStreak(nonArchived, compByDay),
+    [nonArchived, compByDay]
+  );
+
+  // ── XP feedback helper ──
+  const celebrate = (
+    awarded: number,
+    leveledUp: boolean,
+    newLevel: number,
+    title: string
+  ) => {
+    if (awarded <= 0) return;
+    if (leveledUp) {
+      confetti({
+        particleCount: 140,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ["#7c4dff", "#a78bfa", "#f0ecff"],
+      });
+      toast.success(`${levelTerm} UP! You reached ${levelTerm} ${newLevel}`, {
+        description: `+${awarded} ${xpTerm} — ${title}`,
+      });
+    } else {
+      toast.success(`+${awarded} ${xpTerm}`, { description: title });
+    }
   };
 
-  const deleteHabit = async (id: string) => {
-    const supabase = createClient();
-    const { error } = await supabase.from("habits").delete().eq("id", id);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setHabits((h) => h.filter((x) => x.id !== id));
-  };
-
+  // ── habit actions ──
   const completeHabit = async (habit: Habit) => {
-    if (doneToday.has(habit.id) || completing) return;
-    setCompleting(habit.id);
+    if (busyHabit || doneToday.has(habit.id)) return;
+    setBusyHabit(habit.id);
     const supabase = createClient();
     const { data, error } = await supabase.rpc("complete_habit", {
       p_habit_id: habit.id,
     });
-    setCompleting(null);
+    setBusyHabit(null);
+    if (error) return toast.error(error.message);
+    const r = Array.isArray(data) ? data[0] : data;
+    if (!r) return;
+    if (r.awarded > 0) {
+      setCompletions((prev) => [
+        ...prev,
+        { habit_id: habit.id, completed_on: tk, xp_granted: r.awarded },
+      ]);
+    }
+    onStatsChange(r.new_xp, r.new_level);
+    celebrate(r.awarded, r.leveled_up, r.new_level, habit.title);
+  };
+
+  const uncompleteHabit = async (habit: Habit) => {
+    if (busyHabit || !doneToday.has(habit.id)) return;
+    setBusyHabit(habit.id);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("uncomplete_habit", {
+      p_habit_id: habit.id,
+    });
+    setBusyHabit(null);
+    if (error) return toast.error(error.message);
+    const r = Array.isArray(data) ? data[0] : data;
+    setCompletions((prev) =>
+      prev.filter((c) => !(c.habit_id === habit.id && c.completed_on.slice(0, 10) === tk))
+    );
+    if (r) onStatsChange(r.new_xp, r.new_level);
+  };
+
+  const patchHabit = (id: string, patch: Partial<Habit>) =>
+    setHabits((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)));
+
+  const togglePause = async (habit: Habit) => {
+    const next = !habit.is_paused;
+    patchHabit(habit.id, { is_paused: next });
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("habits")
+      .update({ is_paused: next })
+      .eq("id", habit.id);
     if (error) {
+      patchHabit(habit.id, { is_paused: !next });
       toast.error(error.message);
-      return;
+    } else {
+      toast.success(next ? "Paused." : "Resumed.");
     }
-    const result = Array.isArray(data) ? data[0] : data;
-    if (!result) return;
+  };
 
-    setDoneToday((s) => new Set(s).add(habit.id));
-    onStatsChange(result.new_xp, result.new_level);
+  const toggleArchive = async (habit: Habit) => {
+    const next = habit.archived_at ? null : new Date().toISOString();
+    patchHabit(habit.id, { archived_at: next });
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("habits")
+      .update({ archived_at: next })
+      .eq("id", habit.id);
+    if (error) {
+      patchHabit(habit.id, { archived_at: habit.archived_at });
+      toast.error(error.message);
+    } else {
+      toast.success(next ? "Archived." : "Unarchived.");
+    }
+  };
 
-    if (result.awarded > 0) {
-      if (result.leveled_up) {
-        confetti({
-          particleCount: 140,
-          spread: 80,
-          origin: { y: 0.6 },
-          colors: ["#7c4dff", "#a78bfa", "#f0ecff"],
-        });
-        toast.success(`${levelTerm} UP! You reached ${levelTerm} ${result.new_level}`, {
-          description: `+${result.awarded} ${xpTerm} — ${habit.title}`,
-        });
-      } else {
-        toast.success(`+${result.awarded} ${xpTerm}`, {
-          description: habit.title,
-        });
+  const renameHabit = async (habit: Habit, title: string) => {
+    patchHabit(habit.id, { title });
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("habits")
+      .update({ title })
+      .eq("id", habit.id);
+    if (error) {
+      patchHabit(habit.id, { title: habit.title });
+      toast.error(error.message);
+    }
+  };
+
+  const deleteHabit = async (habit: Habit) => {
+    setHabits((prev) => prev.filter((h) => h.id !== habit.id));
+    setCompletions((prev) => prev.filter((c) => c.habit_id !== habit.id));
+    const supabase = createClient();
+    const { error } = await supabase.from("habits").delete().eq("id", habit.id);
+    if (error) toast.error(error.message);
+  };
+
+  const habitActions: HabitActions = {
+    onComplete: completeHabit,
+    onUncomplete: uncompleteHabit,
+    onPause: togglePause,
+    onArchive: toggleArchive,
+    onDelete: deleteHabit,
+    onRename: renameHabit,
+  };
+
+  // ── todo actions ──
+  const addTodo = async (title: string, xp: number) => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("todos")
+      .insert({ user_id: hero.profile.id, title, xp_reward: xp, done: false })
+      .select()
+      .single();
+    if (error) return toast.error(error.message);
+    setTodos((prev) => [...prev, data as Todo]);
+  };
+
+  const toggleTodo = async (t: Todo) => {
+    if (busyTodo) return;
+    setBusyTodo(t.id);
+    const supabase = createClient();
+    if (!t.done) {
+      const { data, error } = await supabase.rpc("complete_todo", {
+        p_todo_id: t.id,
+      });
+      setBusyTodo(null);
+      if (error) return toast.error(error.message);
+      const r = Array.isArray(data) ? data[0] : data;
+      setTodos((prev) =>
+        prev.map((x) => (x.id === t.id ? { ...x, done: true } : x))
+      );
+      if (r) {
+        onStatsChange(r.new_xp, r.new_level);
+        celebrate(r.awarded, r.leveled_up, r.new_level, t.title);
       }
+    } else {
+      const { data, error } = await supabase.rpc("uncomplete_todo", {
+        p_todo_id: t.id,
+      });
+      setBusyTodo(null);
+      if (error) return toast.error(error.message);
+      const r = Array.isArray(data) ? data[0] : data;
+      setTodos((prev) =>
+        prev.map((x) => (x.id === t.id ? { ...x, done: false } : x))
+      );
+      if (r) onStatsChange(r.new_xp, r.new_level);
     }
+  };
+
+  const deleteTodo = async (t: Todo) => {
+    setTodos((prev) => prev.filter((x) => x.id !== t.id));
+    const supabase = createClient();
+    const { error } = await supabase.from("todos").delete().eq("id", t.id);
+    if (error) toast.error(error.message);
   };
 
   if (loading) {
@@ -137,154 +307,81 @@ export function Tracker({
   }
 
   return (
-    <div className="w-full max-w-xl space-y-6">
-      {/* ── New habit form ── */}
-      <div className="rounded-sm border border-border bg-card/40 p-4 space-y-3">
-        <p
-          className="text-[9px] tracking-[0.24em] uppercase text-accent"
-          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          ◈ Forge a new {taskTerm}
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="e.g. Train for 30 minutes"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addHabit();
-            }}
-            maxLength={80}
-            className="flex-1 px-3.5 py-2.5 text-sm bg-background/60 rounded-sm outline-none border border-border focus:border-primary/60 transition-colors min-w-0"
-            style={{ fontFamily: "'Outfit', sans-serif" }}
-          />
-          <button
-            onClick={addHabit}
-            disabled={!title.trim() || adding}
-            className="px-4 rounded-sm border flex items-center gap-1.5 text-[10px] tracking-[0.16em] transition-all duration-150 disabled:opacity-40"
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              background: "rgba(124,77,255,0.16)",
-              borderColor: "rgba(124,77,255,0.45)",
-              color: "var(--accent)",
-            }}
-          >
-            {adding ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <Plus size={12} />
-            )}
-            ADD
-          </button>
-        </div>
-        <div className="flex gap-2">
-          {DIFFICULTIES.map((d) => {
-            const isSelected = difficulty === d.id;
-            return (
-              <button
-                key={d.id}
-                onClick={() => setDifficulty(d.id)}
-                className="flex-1 py-2 rounded-sm border text-center transition-all duration-150"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  background: isSelected ? `${d.color}1e` : "transparent",
-                  borderColor: isSelected ? `${d.color}70` : "var(--border)",
-                }}
-              >
-                <span
-                  className="block text-[9px] tracking-[0.18em]"
-                  style={{
-                    color: isSelected ? d.color : "var(--muted-foreground)",
-                  }}
-                >
-                  {d.label}
-                </span>
-                <span className="block text-[8px] tracking-[0.12em] text-muted-foreground/70">
-                  +{d.xp} {xpTerm}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+    <div className="w-full max-w-xl space-y-5">
+      {/* View switcher */}
+      <div className="flex gap-1.5 rounded-sm border border-border bg-card/40 p-1">
+        {VIEWS.map((v) => {
+          const active = view === v.id;
+          return (
+            <button
+              key={v.id}
+              onClick={() => setView(v.id)}
+              className="flex-1 py-2 rounded-sm flex items-center justify-center gap-1.5 text-[9px] tracking-[0.14em] transition-all mono"
+              style={{
+                background: active ? "rgba(124,77,255,0.16)" : "transparent",
+                color: active ? "var(--accent)" : "var(--muted-foreground)",
+              }}
+            >
+              {v.icon}
+              <span className="hidden sm:inline">{v.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Quest list ── */}
-      {habits.length === 0 ? (
-        <p
-          className="text-center text-[11px] tracking-[0.18em] text-muted-foreground py-10"
-          style={{ fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          NO {taskTerm}S YET — FORGE YOUR FIRST ONE ABOVE
-        </p>
-      ) : (
-        <div className="space-y-2.5">
-          <AnimatePresence initial={false}>
-            {habits.map((habit) => {
-              const done = doneToday.has(habit.id);
-              const meta = difficultyFromReward(habit.xp_reward);
-              return (
-                <motion.div
-                  key={habit.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="rounded-sm border p-3.5 flex items-center gap-3.5 group transition-colors"
-                  style={{
-                    borderColor: done ? `${meta.color}45` : "var(--border)",
-                    background: done ? `${meta.color}0c` : "var(--card)",
-                  }}
-                >
-                  {/* Complete button */}
-                  <button
-                    onClick={() => completeHabit(habit)}
-                    disabled={done || completing === habit.id}
-                    title={done ? "Completed today" : `Complete ${taskTerm.toLowerCase()}`}
-                    className="w-9 h-9 rounded-sm border flex items-center justify-center flex-shrink-0 transition-all duration-150 disabled:cursor-default hover:scale-105"
-                    style={{
-                      borderColor: done ? meta.color : `${meta.color}50`,
-                      background: done ? `${meta.color}30` : "transparent",
-                      color: meta.color,
-                      boxShadow: done ? `0 0 14px ${meta.color}35` : "none",
-                    }}
-                  >
-                    {completing === habit.id ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : done ? (
-                      <Check size={15} strokeWidth={3} />
-                    ) : null}
-                  </button>
+      {view !== "todos" && view !== "stats" && view !== "month" && (
+        <CreateHabit hero={hero} onCreated={(h) => setHabits((p) => [...p, h])} />
+      )}
 
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={`text-sm truncate ${done ? "line-through text-muted-foreground" : "text-foreground"}`}
-                    >
-                      {habit.title}
-                    </p>
-                    <p
-                      className="text-[8px] tracking-[0.18em]"
-                      style={{
-                        fontFamily: "'JetBrains Mono', monospace",
-                        color: meta.color,
-                      }}
-                    >
-                      {meta.label} · +{habit.xp_reward} {xpTerm}
-                    </p>
-                  </div>
+      {view === "today" && (
+        <TodayView
+          habits={nonArchived}
+          doneToday={doneToday}
+          streaks={streaks}
+          busyId={busyHabit}
+          xpTerm={xpTerm}
+          taskTerm={taskTerm}
+          actions={habitActions}
+        />
+      )}
 
-                  <button
-                    onClick={() => deleteHabit(habit.id)}
-                    title={`Abandon ${taskTerm.toLowerCase()}`}
-                    className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-sm flex items-center justify-center text-muted-foreground hover:text-red-400 transition-all flex-shrink-0"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-        </div>
+      {view === "week" && (
+        <WeekView
+          habits={nonArchived}
+          compByHabit={compByHabit}
+          taskTerm={taskTerm}
+        />
+      )}
+
+      {view === "month" && (
+        <MonthView
+          habits={nonArchived}
+          compByDay={compByDay}
+          xpByDay={xpByDay}
+          color={style.color}
+          xpTerm={xpTerm}
+        />
+      )}
+
+      {view === "todos" && (
+        <TodoList
+          todos={todos}
+          busyId={busyTodo}
+          xpTerm={xpTerm}
+          onAdd={addTodo}
+          onToggle={toggleTodo}
+          onDelete={deleteTodo}
+        />
+      )}
+
+      {view === "stats" && (
+        <StatsView
+          hero={hero}
+          completions={completions}
+          daily={dailyStreakVal}
+          perfect={perfectStreakVal}
+          color={style.color}
+        />
       )}
     </div>
   );

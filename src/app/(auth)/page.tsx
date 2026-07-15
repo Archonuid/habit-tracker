@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { Eye, EyeOff, ArrowRight, Sun, Moon, Loader2 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { ARCHETYPES, FLOATING_CHIPS } from "@/app/lib/constants";
 import { RuneOrb } from "@/app/components/auth/RuneOrb";
 import { InputField } from "@/app/components/auth/InputField";
@@ -11,7 +12,8 @@ import { createClient } from "@/app/lib/supabase/client";
 
 export default function AuthPage() {
   const router = useRouter();
-  const [isDark, setIsDark] = useState(true);
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme !== "light";
   const [mode, setMode] = useState<"signup" | "login">("signup");
   const [showPassword, setShowPassword] = useState(false);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -106,7 +108,7 @@ export default function AuthPage() {
   const gridColor = isDark ? "rgba(139,92,246," : "rgba(91,48,214,";
 
   return (
-    <div className={isDark ? "dark" : ""}>
+    <div>
       <div
         className="min-h-screen bg-background text-foreground flex overflow-hidden relative"
         style={{ fontFamily: "'Outfit', sans-serif" }}
@@ -140,7 +142,7 @@ export default function AuthPage() {
 
         {/* Theme toggle */}
         <button
-          onClick={() => setIsDark((v) => !v)}
+          onClick={() => setTheme(isDark ? "light" : "dark")}
           className="fixed top-4 right-4 z-50 w-9 h-9 flex items-center justify-center rounded-sm border border-border bg-card/70 text-muted-foreground hover:text-foreground transition-all duration-200 backdrop-blur-sm"
           title="Toggle theme"
         >

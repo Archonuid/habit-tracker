@@ -7,7 +7,7 @@ const PROTECTED_PREFIXES = [
   "/profile",
   "/tracker",
   "/archetype",
-  "/familiar",
+  "/sigil",
   "/interests",
   "/username",
 ];

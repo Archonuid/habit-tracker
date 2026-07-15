@@ -40,7 +40,7 @@ export default function UsernamePage() {
       );
       return;
     }
-    router.push("/familiar");
+    router.push("/sigil");
   };
 
   return (

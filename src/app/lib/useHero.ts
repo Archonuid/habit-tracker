@@ -70,5 +70,19 @@ export function useHero({ requireOnboarded = true } = {}) {
       h ? { ...h, profile: { ...h.profile, current_xp, level } } : h
     );
 
-  return { hero, setStats, loading };
+  /** Merge partial profile changes (username, archetype_id …). */
+  const patchProfile = (p: Partial<Profile>) =>
+    setHero((h) => (h ? { ...h, profile: { ...h.profile, ...p } } : h));
+
+  /** Swap the archetype row (lore terms) after a change. */
+  const setArchetype = (archetype: ArchetypeRow | null) =>
+    setHero((h) => (h ? { ...h, archetype } : h));
+
+  /** Merge partial familiar changes (name, personality, animal). */
+  const patchFamiliar = (f: Partial<FamiliarRow>) =>
+    setHero((h) =>
+      h && h.familiar ? { ...h, familiar: { ...h.familiar, ...f } } : h
+    );
+
+  return { hero, setStats, patchProfile, setArchetype, patchFamiliar, loading };
 }

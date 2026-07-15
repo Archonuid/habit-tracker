@@ -2,18 +2,38 @@
 
 import { useMemo } from "react";
 import { motion } from "motion/react";
-import { archetypeStyle, PERSONALITIES } from "@/app/lib/constants";
+import { Flame, Snowflake, Target, Trophy } from "lucide-react";
+import {
+  archetypeStyle,
+  gradeFor,
+  PERSONALITIES,
+  sigilKey,
+  sigilTerm,
+} from "@/app/lib/constants";
+import { gradeTierName } from "@/app/lib/ranks";
 import { levelProgress } from "@/app/lib/xp";
-import { familiarGreeting, familiarEmoji } from "@/app/lib/familiar";
+import { familiarLine } from "@/app/lib/familiar";
+import { Sigil } from "@/app/components/sigil/Sigil";
 import type { Hero } from "@/app/lib/types";
+import type { HeroMomentum } from "@/app/lib/momentum";
 
-export function StatusWindow({ hero }: { hero: Hero }) {
+export function StatusWindow({
+  hero,
+  momentum,
+}: {
+  hero: Hero;
+  momentum?: HeroMomentum;
+}) {
   const style = archetypeStyle(hero.archetype?.name);
   const personality = PERSONALITIES.find(
     (p) => p.id === hero.familiar?.personality
   );
   const progress = levelProgress(hero.profile.current_xp);
-  const greeting = useMemo(() => familiarGreeting(hero), [hero]);
+  const greeting = useMemo(
+    () => familiarLine(hero, momentum),
+    [hero, momentum]
+  );
+  const grade = momentum ? gradeFor(momentum.weeklyPct) : null;
 
   // Per-class lore terms from the archetypes table
   const statusTerm = hero.archetype?.status_term ?? "Status Window";
@@ -147,6 +167,37 @@ export function StatusWindow({ hero }: { hero: Hero }) {
         )}
       </motion.div>
 
+      {/* ── Momentum highlights ── */}
+      {momentum && grade && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.08 }}
+          className="grid grid-cols-3 gap-2.5"
+        >
+          <Highlight
+            icon={
+              momentum.frozen ? <Snowflake size={14} /> : <Flame size={14} />
+            }
+            color={momentum.frozen ? "#67e8f9" : "#fb923c"}
+            value={`${momentum.dailyStreak}d`}
+            label={momentum.frozen ? "Frozen streak" : "Day streak"}
+          />
+          <Highlight
+            icon={<Target size={14} />}
+            color={style.color}
+            value={`${momentum.doneToday}/${momentum.dueToday}`}
+            label="Today"
+          />
+          <Highlight
+            icon={<Trophy size={14} />}
+            color={grade.color}
+            value={gradeTierName(grade.letter, hero.archetype?.name)}
+            label={`${momentum.weeklyPct}% this wk`}
+          />
+        </motion.div>
+      )}
+
       {/* ── Familiar greeting ── */}
       {hero.familiar && (
         <motion.div
@@ -155,18 +206,21 @@ export function StatusWindow({ hero }: { hero: Hero }) {
           transition={{ duration: 0.35, delay: 0.15 }}
           className="rounded-sm border border-border bg-card/40 p-4 flex items-start gap-3.5"
         >
-          <div
-            className="w-11 h-11 rounded-sm border flex items-center justify-center text-xl flex-shrink-0"
-            style={{
-              borderColor: personality
-                ? `${personality.color}50`
-                : "var(--border)",
-              background: personality ? `${personality.color}12` : "var(--card)",
-            }}
-          >
-            {familiarEmoji(hero)}
+          <div className="flex-shrink-0">
+            <Sigil
+              archetype={sigilKey(hero.archetype?.name)}
+              streak={momentum?.dailyStreak ?? 0}
+              level={progress.level}
+              size={46}
+            />
           </div>
           <div className="space-y-1 min-w-0">
+            <p
+              className="text-[8px] tracking-[0.24em] uppercase text-muted-foreground/70"
+              style={{ fontFamily: "'JetBrains Mono', monospace" }}
+            >
+              ◈ {sigilTerm(hero.archetype?.name)}
+            </p>
             <p
               className="text-[9px] tracking-[0.2em] uppercase"
               style={{
@@ -183,6 +237,41 @@ export function StatusWindow({ hero }: { hero: Hero }) {
           </div>
         </motion.div>
       )}
+    </div>
+  );
+}
+
+function Highlight({
+  icon,
+  color,
+  value,
+  label,
+}: {
+  icon: React.ReactNode;
+  color: string;
+  value: string;
+  label: string;
+}) {
+  return (
+    <div
+      className="rounded-sm border p-3 text-center space-y-1"
+      style={{ borderColor: `${color}30`, background: `${color}0c` }}
+    >
+      <div className="flex justify-center" style={{ color }}>
+        {icon}
+      </div>
+      <div
+        className="text-base sm:text-lg font-bold leading-tight break-words"
+        style={{ fontFamily: "'Cinzel', serif" }}
+      >
+        {value}
+      </div>
+      <div
+        className="text-[8px] tracking-[0.12em] uppercase text-muted-foreground truncate"
+        style={{ fontFamily: "'JetBrains Mono', monospace" }}
+      >
+        {label}
+      </div>
     </div>
   );
 }

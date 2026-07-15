@@ -179,3 +179,11 @@
     line-height: 1.5;
   }
 }
+
+/* Shorthand for the monospace UI accents used throughout the app. */
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+.serif {
+  font-family: 'Cinzel', serif;
+}

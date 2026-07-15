@@ -1,3 +1,5 @@
+import type { Archetype as SigilArchetype } from "@/app/components/sigil/sigils";
+
 export interface Archetype {
   name: string;
   color: string;
@@ -64,6 +66,87 @@ export const PERSONALITIES: Personality[] = [
   { id: "chaotic", name: "CHAOTIC", color: "#c084fc", tagline: "Unhinged gremlin energy. Chaos is a ladder." },
   { id: "deadpan", name: "DEADPAN", color: "#94a3b8", tagline: "Dry wit. Brutal honesty. Secretly proud of you." },
 ];
+
+// Weekly report card renamed per archetype (proper-case keys, matching the
+// Supabase `archetypes` table).
+export const REPORT_CARD_TITLES: Record<string, string> = {
+  Hunter: "Hunter's Field Report",
+  Assassin: "Assassin's Contract Ledger",
+  Adventurer: "Adventurer's Travel Log",
+  Siren: "Siren's Songbook",
+  Cyborg: "Cyborg's Diagnostics Log",
+  Elf: "Elf's Ancient Scroll",
+  Ranker: "Ranker's Ladder Report",
+  Player: "Player's Scoreboard",
+  Traveller: "Traveller's Chronicle",
+};
+
+export function reportCardTitle(name: string | undefined | null) {
+  return REPORT_CARD_TITLES[name ?? ""] ?? "Weekly Report Card";
+}
+
+// The companion is an archetype-bound sigil/rune instead of a familiar. Each
+// archetype names its sigil differently (proper-case keys, matching the
+// Supabase `archetypes` table).
+export const SIGIL_TERMS: Record<string, string> = {
+  Adventurer: "Compass",
+  Elf: "Rune",
+  Player: "System Window",
+  Traveller: "Constellation",
+  Assassin: "Mark",
+  Cyborg: "Core",
+  Hunter: "Quarry",
+  Siren: "Tide",
+  Ranker: "Crest",
+};
+
+/** What this archetype calls its companion sigil (e.g. "Compass"). */
+export function sigilTerm(name: string | undefined | null) {
+  return SIGIL_TERMS[name ?? ""] ?? "Sigil";
+}
+
+const SIGIL_KEYS = new Set<SigilArchetype>([
+  "adventurer",
+  "assassin",
+  "cyborg",
+  "elf",
+  "hunter",
+  "player",
+  "siren",
+  "ranker",
+  "traveller",
+]);
+
+/** Maps a proper-case archetype name to its lowercase Sigil registry key. */
+export function sigilKey(name: string | undefined | null): SigilArchetype {
+  const k = (name ?? "").toLowerCase() as SigilArchetype;
+  return SIGIL_KEYS.has(k) ? k : "adventurer";
+}
+
+// Weekdays in JS getDay() convention (0=Sun … 6=Sat), displayed Mon-first.
+export const WEEKDAYS: { i: number; short: string; label: string }[] = [
+  { i: 1, short: "M", label: "Mon" },
+  { i: 2, short: "T", label: "Tue" },
+  { i: 3, short: "W", label: "Wed" },
+  { i: 4, short: "T", label: "Thu" },
+  { i: 5, short: "F", label: "Fri" },
+  { i: 6, short: "S", label: "Sat" },
+  { i: 0, short: "S", label: "Sun" },
+];
+
+// Letter grades for the weekly report card, keyed off completion %.
+export const GRADES: { min: number; letter: string; color: string; note: string }[] = [
+  { min: 95, letter: "S", color: "#fbbf24", note: "Legendary discipline" },
+  { min: 85, letter: "A", color: "#4ade80", note: "Heroic consistency" },
+  { min: 70, letter: "B", color: "#22d3ee", note: "Steady progress" },
+  { min: 50, letter: "C", color: "#818cf8", note: "Finding your rhythm" },
+  { min: 30, letter: "D", color: "#fb923c", note: "The grind is real" },
+  { min: 0, letter: "F", color: "#f87171", note: "A new arc begins" },
+];
+
+export function gradeFor(pct: number) {
+  return GRADES.find((g) => pct >= g.min) ?? GRADES[GRADES.length - 1];
+}
 
 export const INTEREST_TAGS: { name: string; color: string }[] = [
   { name: "SHONEN", color: "#f87171" },
